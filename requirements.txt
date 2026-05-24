@@ -1,0 +1,7 @@
+ultralytics
+opencv-python
+deepface
+tf-keras
+easyocr
+numpy
+pywin32
