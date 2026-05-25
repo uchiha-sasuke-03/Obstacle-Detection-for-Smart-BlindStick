@@ -58,11 +58,12 @@ def main():
                 object_id = f"{class_name}_{location}_{distance}"
                 current_objects.append(object_id)
                 
-                # For regular objects, we use a 3-second cooldown to prevent spam
+                # For regular objects, only speak aloud if they are "close"
                 if class_name not in ["traffic light", "stop sign"]:
-                    if object_id not in last_spoken_objects or (time.time() - last_spoken_objects[object_id]) > 3:
-                        tts.speak(f"{class_name} {distance}, {location}")
-                        last_spoken_objects[object_id] = time.time()
+                    if distance == "close":
+                        if object_id not in last_spoken_objects or (time.time() - last_spoken_objects[object_id]) > 3:
+                            tts.speak(f"{class_name} {distance}, {location}")
+                            last_spoken_objects[object_id] = time.time()
                 else:
                     # For traffic lights and signs, we pass them constantly and let their own internal modules 
                     # decide when they have a clear enough image to speak (using their own cooldowns).
