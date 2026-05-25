@@ -60,10 +60,25 @@ def main():
                 
                 # For regular objects, only speak aloud if they are "close"
                 if class_name not in ["traffic light", "stop sign"]:
+                    # If YOLO detects a "person", try face recognition to get their name
+                    spoken_name = class_name
+                    if class_name == "person":
+                        # Try direct face recognition in the person's bounding box
+                        recognized = face_rec.identify_person(frame, xyxy)
+                        if recognized:
+                            spoken_name = recognized
+                        else:
+                            # Fall back to cached recognition result
+                            cached = face_rec.get_cached_name()
+                            if cached:
+                                spoken_name = cached
+
                     if distance == "close":
-                        if object_id not in last_spoken_objects or (time.time() - last_spoken_objects[object_id]) > 3:
-                            tts.speak(f"{class_name} {distance}, {location}")
-                            last_spoken_objects[object_id] = time.time()
+                        # Use the recognized name (or "person") as the object_id
+                        face_object_id = f"{spoken_name}_{location}_{distance}"
+                        if face_object_id not in last_spoken_objects or (time.time() - last_spoken_objects[face_object_id]) > 3:
+                            tts.speak(f"{spoken_name} {distance}, {location}")
+                            last_spoken_objects[face_object_id] = time.time()
                 else:
                     # For traffic lights and signs, we pass them constantly and let their own internal modules 
                     # decide when they have a clear enough image to speak (using their own cooldowns).
@@ -87,8 +102,8 @@ def main():
         for k in keys_to_delete:
             del last_spoken_objects[k]
 
-        # 3. Face Recognition (run every 10 frames to save CPU)
-        if frame_count % 10 == 0:
+        # 3. Face Recognition (run every 5 frames for fast detection)
+        if frame_count % 5 == 0:
             face_rec.recognize(frame, tts)
 
         # Draw UI

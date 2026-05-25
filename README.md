@@ -1,6 +1,6 @@
 # Smart Blind Stick — AI Object Detection & Navigation System
 
-An advanced, real-time AI computer vision system designed to act as the **"eyes"** for a smart blind stick. Powered by **YOLOv8** and **Facenet512**, this system runs locally on a camera feed to detect obstacles, analyze spatial positions, recognize known faces, read text via OCR, and analyze traffic lights — all while providing seamless **audio feedback** without blocking the video stream.
+An advanced, real-time AI computer vision system designed to act as the **"eyes"** for a smart blind stick. Powered by **YOLOv8**, **MTCNN**, and **FaceNet (InceptionResnetV1)**, this system runs locally on a camera feed to detect obstacles, recognize known faces by name, read text via OCR, and analyze traffic lights — all while providing seamless **audio feedback** without blocking the video stream.
 
 ---
 
@@ -8,8 +8,19 @@ An advanced, real-time AI computer vision system designed to act as the **"eyes"
 
 ### 🔍 Object Detection & Spatial Awareness
 Uses a pre-trained **YOLOv8s** model to detect common objects (people, vehicles, furniture, etc.). The camera feed is divided into a **3×3 grid** to estimate:
-- **Distance**: "close" or "far" (based on bounding box size)
+- **Distance**: "close", "medium distance", or "far" (based on bounding box area ratio)
 - **Location**: "left", "straight ahead", or "right"
+
+> **Smart Alert Mode**: Only objects at **"close" distance** trigger voice alerts. Medium and far objects are shown on-screen but remain silent — reducing noise and prioritizing immediate hazards.
+
+### 👤 Face Recognition (PyTorch FaceNet + MTCNN)
+When YOLO detects a **"person"**, the system automatically tries to identify them:
+- **MTCNN** (Multi-task Cascaded Convolutional Networks): State-of-the-art face detection that works reliably in **low light, varied angles, and partial occlusion**.
+- **InceptionResnetV1 (FaceNet)**: Extracts **512-dimensional face embeddings** pre-trained on **VGGFace2** (3.3 million faces).
+- **Cosine Similarity Matching**: Compares live embeddings against a trained database using weighted scoring (60% best individual + 40% average centroid).
+- **YOLO Integration**: Replaces the generic "person" label with the recognized name — speaks **"Anupam close, straight ahead"** instead of "person close, straight ahead".
+- **Low-Light Robustness**: Applies **CLAHE** (Contrast Limited Adaptive Histogram Equalization) as a fallback when face detection initially fails.
+- **Training Augmentation**: Each image generates 9 variants (gamma correction, brightness shifts, CLAHE, horizontal flip) for robust matching across lighting conditions.
 
 ### 🚦 Continuous Traffic Light Detection
 When a traffic light is detected, the AI zooms in, analyzes the dominant colors using **OpenCV HSV masking**, and announces:
@@ -20,13 +31,6 @@ Detects road signs (e.g., Stop Signs) and automatically triggers the **OCR** eng
 
 ### 📖 On-Demand Text Reading (OCR)
 Point the camera at any book, document, or sign and press **`r`** to scan and read all visible text using **EasyOCR**.
-
-### 👤 Facial Recognition (Pre-trained Facenet512)
-Uses a **pre-trained Facenet512 embedding database** for fast, accurate face recognition:
-- **Training Pipeline** (`train_faces.py`): Extracts 512-dimensional face embeddings from all images in `known_faces/`, supporting both individual headshots and subfolder-based grouping.
-- **Runtime Matching**: Detects the **largest face** in the live frame, extracts its embedding, and compares it against the database using **weighted cosine similarity** (60% best individual match + 40% average).
-- **Smart Name Extraction**: Subfolder names become person names (e.g., `known_faces/Nandeeshwar Sir/*.jpg` → "I see Nandeeshwar Sir").
-- **Anti-Spam Cooldown**: 8-second cooldown prevents repeated announcements for the same person.
 
 ### 🔊 Asynchronous Audio Engine (TTS)
 Uses native **Windows SAPI** (`win32com`) inside an isolated, non-blocking background thread. The video feed will *never* lag, stutter, or freeze while the computer is speaking.
@@ -45,7 +49,7 @@ This software is built and optimized for **Windows**.
 - A standard Webcam (or Raspberry Pi Camera module).
 
 ### 2. Software Required
-- **Python 3.11** (Highly recommended. Newer or older versions may face dependency compilation issues with TensorFlow/Keras).
+- **Python 3.10–3.14** (PyTorch-based pipeline, no TensorFlow dependency).
 - **Git** (to clone the repository).
 
 ---
@@ -60,16 +64,17 @@ cd Obstacle-Detection-for-Smart-BlindStick
 
 ### Step 2: Create a Virtual Environment (Recommended)
 ```cmd
-py -3.11 -m venv venv
+python -m venv venv
 .\venv\Scripts\activate
 ```
 
 ### Step 3: Install Dependencies
 ```cmd
-pip install -r requirements.txt
+pip install ultralytics opencv-contrib-python easyocr pywin32
+pip install facenet-pytorch --no-deps
 ```
 
-> **Note:** The first run will automatically download pre-trained weights for `ultralytics`, `deepface`, and `easyocr` into your system cache. This may take a few minutes.
+> **Note:** The first run will automatically download pre-trained weights for YOLOv8, MTCNN, and InceptionResnetV1 into your system cache. This may take a few minutes.
 
 ### Step 4: Setup Facial Recognition
 
@@ -98,31 +103,33 @@ python train_faces.py
 
 This will:
 - Scan all images in `known_faces/` (including subfolders)
-- Extract **Facenet512** face embeddings (512-dimensional vectors)
-- For small headshots (≤300px): use the entire image as a face crop
-- For larger images: detect and extract only the **largest face** (ignores background people)
-- Save the database to `known_faces/face_embeddings.pkl`
+- Detect faces using **MTCNN** (handles all angles and lighting)
+- Extract **512-dimensional FaceNet embeddings** per face
+- Generate **9 augmented variants** per image (gamma, brightness, CLAHE, flip)
+- Save the database to `known_faces/face_embeddings_v5.pkl`
 
 **Example output:**
 ```
 ==============================================================
-  SMART BLIND STICK - FACE TRAINING PIPELINE v2
+  SMART BLIND STICK - FACE TRAINING v5 (PyTorch FaceNet)
 ==============================================================
-  Model         : Facenet512 (512-dimensional)
-  Detector      : opencv
-  Headshot mode : images <= 300px
+  Model         : InceptionResnetV1 (VGGFace2, 512-dim)
+  Detector      : MTCNN (PyTorch)
+  Augmentation  : flip + gamma + brightness + CLAHE (9x)
 ==============================================================
 
-  [ 1/14] Adithya/Adithya.jpg ... OK - headshot (153x153)
-  [ 2/14] Anupam/Anupam.jpg ... OK - headshot (137x137)
-  [ 5/14] Nandeeshwar Sir/photo1.jpeg ... OK - largest face (227x227 in 720x1600)
+  [ 1/14] Adithya/Adithya.jpg
+           OK - 9/9 variants embedded
+  [ 2/14] Anupam/Anupam.jpg
+           OK - 9/9 variants embedded
   ...
 
 ==============================================================
   TRAINING COMPLETE
 ==============================================================
   People registered : 5
-  Total embeddings  : 14
+  Total embeddings  : 125
+  Source images OK  : 14
   Skipped images    : 0
 ```
 
@@ -145,18 +152,16 @@ python main.py
 ## 🛠️ Project Structure
 
 ```
-├── main.py                  # Core application loop (YOLOv8 + routing)
-├── train_faces.py           # Face embedding training pipeline (Facenet512)
-├── requirements.txt         # Python dependencies
+├── main.py                  # Core application loop (YOLOv8 + face integration)
+├── train_faces.py           # Face embedding training pipeline (MTCNN + FaceNet)
 ├── yolov8s.pt               # YOLOv8 Small model weights
-├── yolov8n.pt               # YOLOv8 Nano model weights (backup)
 ├── known_faces/             # Face recognition image database
 │   ├── PersonName.jpg       # Individual headshot photos
 │   └── PersonName/          # Subfolder with multiple photos
 │       └── *.jpg
 └── modules/
     ├── audio_tts.py         # Async Windows SAPI voice engine (non-blocking)
-    ├── face_recognizer.py   # Facenet512 face matching engine
+    ├── face_recognizer.py   # MTCNN + FaceNet face matching engine
     ├── ocr_reader.py        # EasyOCR text reading module
     ├── spatial_grid.py      # 3×3 grid positioning & distance estimation
     ├── road_signs.py        # Threaded road sign detection + OCR
@@ -171,28 +176,37 @@ python main.py
 ┌──────────────────────────────────────────────────────────┐
 │                    TRAINING (Offline)                     │
 │                                                          │
-│  known_faces/  ──►  extract_faces  ──►  Facenet512       │
-│  (images)          (largest face)      (512-dim vector)  │
-│                                            │             │
-│                                            ▼             │
-│                                   face_embeddings.pkl    │
-│                                   (per-person DB)        │
+│  known_faces/  ──►  MTCNN Face    ──►  InceptionResnetV1 │
+│  (images)          Detection          (512-dim vector)   │
+│       │                                     │            │
+│       ▼                                     ▼            │
+│  9 augmented                       face_embeddings.pkl   │
+│  variants each                     (per-person DB with   │
+│  (gamma, flip,                      individual + avg     │
+│   brightness,                       embeddings)          │
+│   CLAHE)                                                 │
 └──────────────────────────────────────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────┐
 │                    RUNTIME (Live)                         │
 │                                                          │
-│  Webcam Frame  ──►  Detect Largest  ──►  Facenet512      │
-│                     Face (OpenCV)       (512-dim vector)  │
-│                                             │            │
-│                                             ▼            │
+│  YOLO detects   ──►  Crop person  ──►  MTCNN detects     │
+│  "person"            region            face in crop      │
+│                                           │              │
+│                                           ▼              │
+│                                    InceptionResnetV1     │
+│                                    (512-dim embedding)   │
+│                                           │              │
+│                                           ▼              │
 │                                    Cosine Similarity     │
 │                                    vs. trained DB        │
-│                                             │            │
-│                                             ▼            │
-│                                 Match ≥ 0.55 ?           │
-│                                   YES → TTS: "I see X"  │
-│                                   NO  → (ignore)        │
+│                                           │              │
+│                                           ▼              │
+│                                 Match ≥ 0.50 ?           │
+│                                   YES → "Anupam close,   │
+│                                          straight ahead" │
+│                                   NO  → "person close,   │
+│                                          straight ahead" │
 └──────────────────────────────────────────────────────────┘
 ```
 
